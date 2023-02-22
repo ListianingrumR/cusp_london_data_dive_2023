@@ -153,8 +153,6 @@ depriv_2011 <- depriv %>%
 summary(depriv_2011)
 ```
 
-### Ethnicity
-
 ### Household
 ```{r}
 hc <- read_csv(here::here("data","household.csv"),locale=locale(encoding = "latin1")) %>%
@@ -376,7 +374,7 @@ summary(ols_model)
 ```
 
 Result:
-Adjusted R-squared = 36%
+Adjusted R-squared = 32.6%
 
 p-values:
 imd_score= 1.007509e-223
