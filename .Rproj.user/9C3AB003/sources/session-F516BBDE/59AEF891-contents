@@ -21,25 +21,34 @@ library(readxl)
 
 **Research question**
 
--   Is there any relationship between CMD and social issues such as population density, deprivation, and household composition in London?
+-   Is there any relationship between CMD(Common Mental Disorders) and social issues such as population density, deprivation, and household composition in London?
+
+**References**
+From Dr. Jay's presentation
+- Likelihood of CMDs is higher in people living alone, with poor physical health and not in work (APMS 2014).
+- Strong association with area deprivation
 
 **Hypothesis**
 
 -   Higher population density and deprivation rate lead to a higher number of SMI patient in London
--   The more diverse ethnicity the lower number of SMI patient
+-   Single household lead the higher number of CMD patient
+
+**Data**
+
+- 
 
 **Analysis**
 
--   Map SMI index across London LSOA
+-   Map SAMHI index across London LSOA
 -   Load population density, deprivation, and ethnicity data
+
+- Mental health index echibit Spatial autocorrelation
 -   Conduct multiple linear regression with SMI index as the dependent variable and selected social issues as independent variables
 -   Experiment with the spatial lag and spatial error models, comparing their results
 -   Run geographically weighted regression (GWR) to see if there is local variation that is not captured by the global model
 
 **Assumptions**
 
--   Assume that data on food purchases does not vary too much over time, such that even though the data was collected in 2015, it can be used to explain obesity rates that were modelled for 2006 to 2008.
--   Assume that the modelled estimates of obesity are an accurate representation of the actual obesity percentages in MSOAs.
 
 ## Data
 
@@ -53,6 +62,7 @@ library(readxl)
 
 -   The SAMHI is a composite annual measure of population mental health for each Lower Super Output Area (LSOA) in England. The SAMHI combines data on mental health from multiple sources (NHS-Mental health related hospital attendances, Prescribing data -- Antidepressants, QOF - depression, and DWP - Incapacity benefit and Employment support allowance for mental illness) into a single index.
 -   The SAMHI index contains 2011-2019 data based on LSOA level in all England
+- We use SAMHI_dec 
 
 [Population Density Data 2011 Census](_)
 
@@ -125,17 +135,20 @@ pd_2011 <- pd %>%
 summary(pd_2011)
 ```
 
-### Deprivation
+### Socio-economic
 
 ```{r deprivation}
-depriv <- read_excel(here::here("data","deprivation.xls"))%>%
+depriv <- read_excel(here::here("data","lsoa-data.xls"))%>%
   clean_names()
+
+head(depriv)
 ```
 
 ```{r}
 # filter 2011 and population density column
 depriv_2011 <- depriv %>%
-  select(lsoa_code, imd_score)
+  select(.,codes, employment_rate,median_annual_household_income_estimate)%>%
+  rename(annual_income=median_annual_household_income_estimate)
 
 summary(depriv_2011)
 ```
@@ -159,6 +172,12 @@ hc_2011 <- hc%>%
   select(geography_code, single_hc)
 ```
 
+```{r}
+sum(is.na(hc$household_composition_one_person_household_measures_value))
+```
+```{r}
+sum(is.na(hc$household_composition_all_categories_household_composition_measures_value))
+```
 ### Predictors
 
 ```{r}
@@ -172,7 +191,7 @@ predictors <- lsoa %>%
             by = c("LSOA11CD"="geography_code"))%>%
   left_join(.,
             depriv_2011, 
-            by = c("LSOA11CD"="lsoa_code"))%>%
+            by = c("LSOA11CD"="codes"))%>%
   left_join(.,
             hc_2011, 
             by = c("LSOA11CD"="geography_code"))
@@ -186,20 +205,38 @@ predictors <- samhi_2011 %>%
             by = c("lsoa11"="geography_code"))%>%
   left_join(.,
             depriv_2011, 
-            by = c("lsoa11"="lsoa_code"))%>%
+            by = c("lsoa11"="codes"))%>%
   left_join(.,
             hc_2011, 
             by = c("lsoa11"="geography_code"))
 ```
 
 ```{r}
-df <- predictors%>%
-  select(.,lsoa11, samhi_dec, area_population_density_density_number_of_persons_per_hectare_measures_value, imd_score, single_hc)%>%
-  clean_names()
+write.csv(df, file='./data.csv')
 ```
 
 ```{r}
-write.csv(df, file='./data.csv')
+# join population density, IMD, and ethnicity to LSOA boundary
+join <- lsoa %>%
+  left_join(.,
+            samhi_2011, 
+            by = c("LSOA11CD"="lsoa11"))%>%
+  left_join(.,
+            pd_2011, 
+            by = c("LSOA11CD"="geography_code"))%>%
+  left_join(.,
+            depriv_2015, 
+            by = c("LSOA11CD"="lsoa_code_2011"))%>%
+  left_join(.,
+            hc_2011, 
+            by = c("LSOA11CD"="geography_code"))
+```
+
+```{r}
+df <- join%>%
+  select(.,LSOA11CD, samhi_dec, area_population_density_density_number_of_persons_per_hectare_measures_value, imd_score, single_hc)%>%
+  rename(pop_dens=area_population_density_density_number_of_persons_per_hectare_measures_value)%>%
+  clean_names()
 ```
 
 ```{r}
@@ -212,38 +249,129 @@ Datatypelist <- df %>%
 ```
 
 ```{r}
-h1 <- ggplot(predictors, aes(x=area_population_density_density_number_of_persons_per_hectare_measures_value)) +
+h1 <- ggplot(df, aes(x=pop_dens)) +
   geom_histogram(color = "darkblue",
                  fill = "lightblue") +
   theme_bw()
 
-h2 <- ggplot(predictors, aes(x=imd_score)) +
+h2 <- ggplot(df, aes(x=imd_score)) +
   geom_histogram(color = "darkblue",
                  fill = "lightblue") +
   theme_bw()
 
-plot_grid(h1,h2)
+h3 <- ggplot(df, aes(x=single_hc)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+plot_grid(h1,h2,h3)
 ```
 
-```{r}
-log_predictors <- predictors %>%
-  mutate(log_density = log(area_population_density_density_number_of_persons_per_hectare_measures_value))%>%
-  mutate(log_imd_score = log(imd_score))
+Most of the variables appear normally distributed, except for population density.
+
+## Multiple Linear Regression
+
+### Check for the Multicollinearity
+
+```{r multicollinearity all}
+# check their correlations are OK
+# pearson correlation is only appropriate for interval or ratio data
+# we are only concerned about multicollinearity between predictor variables
+myvars <- df %>%
+  dplyr::select(samhi_dec,pop_dens,imd_score,single_hc) %>%
+  st_drop_geometry()
+
+# get correlation matrix
+cormat <- cor(myvars, use="complete.obs", method="pearson")
+
+# significance test
+sig1 <- corrplot::cor.mtest(myvars, conf.level = .95)
+
+# create a correlogram
+corrplot::corrplot(cormat, type = "lower",
+                   method = "circle", 
+                   order = "hclust", 
+                   tl.cex = 0.7,
+                   p.mat = sig1$p, sig.level = .05, 
+                   col = viridis::viridis(100, option = "magma"),
+                   diag = FALSE)
 ```
 
-```{r}
-h1 <- ggplot(log_predictors, aes(x=log_density)) +
-  geom_histogram(color = "darkblue",
-                 fill = "lightblue") +
-  theme_bw()
+The size of the circle reflects the strength of the relationships as captured by the Pearson correlation coefficient. Crosses indicate statistically insignificant relationships at the 95% level of confidence. 
 
-h2 <- ggplot(log_predictors, aes(x=log_imd_score)) +
-  geom_histogram(color = "darkblue",
-                 fill = "lightblue") +
-  theme_bw()
+It looks like pop_dens is highly correlated with imd_score and less correlated with samhi_dec, so we will remove pop_dens as a predictor variable.
 
-plot_grid(h1,h2)
+```{r multicollinearity selected}
+myvars2 <- myvars %>%
+  select(samhi_dec,imd_score,single_hc)
+
+cormat <- cor(myvars2, use="complete.obs", method="pearson")
+
+# significance test
+sig1 <- corrplot::cor.mtest(myvars2, conf.level = .95)
+
+# create a correlogram
+corrplot::corrplot(cormat, type="lower",
+                   method = "circle", 
+                   order = "original", 
+                   tl.cex = 0.7,
+                   p.mat = sig1$p, sig.level = .05, 
+                   col = viridis::viridis(100, option = "plasma"),
+                   diag = FALSE)
 ```
+
+The remaining variables no longer exhibit strong multicollinearity, so I will refine my hypothesis as follows: 
+
+* **Hypothesis:** Higher deprivation score and single persone household lead to higher mental health illness
+
+### Check for linear relationship between x and y
+
+```{r linear relationship}
+regression_data <- df %>%
+  dplyr::select(lsoa11cd,
+                samhi_dec,
+                imd_score,
+                single_hc)
+
+p1 <- ggplot(regression_data, aes(x=imd_score, y=samhi_dec)) + 
+  geom_point() +
+  geom_smooth(method=lm) +
+  theme_classic()
+
+p2 <- ggplot(regression_data, aes(x=single_hc, y=samhi_dec)) + 
+  geom_point() +
+  geom_smooth(method=lm) +
+  theme_classic()
+
+plot_grid(p1, p2)
+```
+
+There seems to be a slight positive relationship between all our predictor variables and the percentage of obesity in the population.
+
+### Linear model
+Now I will fit a linear model using the ordinary least squares method. 
+
+```{r lm}
+eq <- samhi_dec ~
+  imd_score + single_hc
+
+ols_model <- lm(eq,
+                data = regression_data)
+
+# show the summary of those outputs
+tidy(ols_model)
+glance(ols_model)
+summary(ols_model)
+```
+
+Result:
+Adjusted R-squared = 36%
+
+p-values:
+imd_score= 1.007509e-223
+single_hc= 5.163738e-173
+
+The results indicate that 36% of the variation in the mental health index can be explained by the deprivation score and average single household. The individual p-values for all predictor variables are significant at the 99.9% level of significance.
 
 ```{r}
 # plot population density
@@ -293,14 +421,3 @@ map_imd <- tm_shape(predictors)+
   tm_layout(bg.color = "white", legend.outside = TRUE)
 map_imd
 ```
-
-Most of the variables appear normally distributed, except for f_soft_drinks, which I will do a log transformation of before using it in the regression model.
-
-```{r join tesco and boundary}
-shape_joined <- msoa_shape %>%
-  left_join(., 
-            selected_variables, 
-            by = c("MSOA11CD" = "area_id"))
-```
-
-## Multiple Linear Regression

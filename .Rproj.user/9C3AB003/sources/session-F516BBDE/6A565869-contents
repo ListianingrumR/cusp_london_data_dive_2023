@@ -1,0 +1,663 @@
+---
+title: "Name: Leandra Faith Lee"
+author: 
+- |
+    | Student number: 21085228
+date: "`r format(Sys.time(), '%X, %d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+# Originality declaration  
+
+I, [**Leandra Lee**], confirm that the work presented in this assessment is my own. Where information has been derived from other sources, I confirm that this has been indicated in the work.
+
+date: `r format(Sys.time(), '%d %B, %Y')`
+
+# Obesity and Diet in London
+
+```{r warning=FALSE, message=FALSE}
+library(sf)
+library(tidyverse)
+library(tmap)
+library(janitor)
+library(here)
+library(broom)
+library(car)
+library(cowplot)
+library(corrr)
+library(sp)
+library(spdep)
+library(spgwr)
+library(spatialreg)
+```
+
+## Project Scope
+**Research question** 
+
+* Is there a relationship between diet and obesity in London?
+
+**Hypothesis**
+
+* Higher weights of average food product purchased, higher volumes of average drink product purchased, higher weights of carbs in the average product purchased, higher weights of fat in the average product purchased, higher fraction of soft drinks purchased and lower nutritional energy of the average product lead to a higher percentage of the population aged 16+ with a BMI of 30+.
+
+**Analysis**
+
+* Map obesity rates across London MSOA
+* Bring in data on food purchases (e.g. weight, carb, fat, energy)
+* Conduct multiple linear regression with obesity as the dependent variable and selected food purchase data as predictor variables
+* Experiment with the spatial lag and spatial error models, comparing their results
+* Run geographically weighted regression (GWR) to see if there is local variation that is not captured by the global model
+
+**Assumptions**
+
+* Assume that data on food purchases does not vary too much over time, such that even though the data was collected in 2015, it can be used to explain obesity rates that were modelled for 2006 to 2008. 
+* Assume that the modelled estimates of obesity are an accurate representation of the actual obesity percentages in MSOAs. 
+
+## Data
+[Statistical GIS Boundary Files for London](https://data.london.gov.uk/dataset/statistical-gis-boundary-files-london)
+
+* This data contains various GIS boundary files for London at different spatial aggregation units, including Lower Super Output Area (LSOA), Middle Super Output Area (MSOA), Wards and Boroughs. 
+* For this analysis, I will use MSOA data so that the spatial units correspond with the data available on obesity. 
+* I will transform the data to a projected coordinate reference system, the British National Grid. 
+
+[Obesity data at MSOA level](https://data.london.gov.uk/dataset/msoa-atlas)
+
+* This MSOA atlas provides a summary of demographic and related data for each Middle Super Output Area in Greater London.
+* The dataset contains two columns related to obesity:
+  + percentage of measured children in Year 6 who were classified as obese, 2009/10-2011/12
+  + a modelled estimate of the percentage of the population aged 16+ with a BMI of 30+, 2006-2008
+* I will use the modelled estimate data as the data has no missing values.
+* The last row of the dataset contains information on the MSOA average for London, which I will filter out
+
+[Tesco supermarket grocery data](https://figshare.com/articles/dataset/Area-level_grocery_purchases/7796666?backTo=/collections/Tesco_Grocery_1_0/4769354)
+
+* This dataset contains aggregated information on food purchases at different geographic aggregation (LSOA, MSOA, Ward, Borough) in London, enriched with information coming from the census.
+* Data on selected months from 2015 are available. I have chosen to use December MSOA data for this analysis as it seems to have complete information for all MSOAs, but other months can be considered too.  
+* The columns in the dataset that I am interested in are: 
+  + weight
+  + volume
+  + fat
+  + carb
+  + energy_tot
+  + f_soft_drinks
+
+### MSOA boundary data
+```{r MSOA boundary}
+msoa_shape <- st_read(here::here("data", 
+                           "statistical-gis-boundaries-london", 
+                           "ESRI", "MSOA_2011_London_gen_MHW.shp")) %>%
+  st_transform(., 27700)
+
+summary(msoa_shape)
+
+# qtm(msoa_shape)
+```
+
+There are 983 MSOAs in London.  
+
+### Obesity data
+```{r MSOA atlas}
+msoa_atlas <- read_csv(here::here("data", "msoa-data.csv"),
+                       locale=locale(encoding = "latin1")) %>%
+  clean_names()
+
+# drop the last row that contains average MSOA data
+msoa_atlas <- msoa_atlas %>%
+  filter(str_detect(middle_super_output_area, "^E02"))
+
+msoa_obesity <- msoa_atlas %>%
+  select(middle_super_output_area,
+         obesity_percentage_of_the_population_aged_16_with_a_bmi_of_30_modelled_estimate_2006_2008) %>%
+  rename(., 
+         obesity_percent = obesity_percentage_of_the_population_aged_16_with_a_bmi_of_30_modelled_estimate_2006_2008)
+
+summary(msoa_obesity)
+
+# join obesity data to MSOA boundary
+msoa_shape <- msoa_shape %>%
+  left_join(.,
+            msoa_obesity, 
+            by = c("MSOA11CD" = "middle_super_output_area"))
+
+Datatypelist <- msoa_shape %>% 
+  st_drop_geometry() %>%
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+qtm(msoa_shape, 
+    fill = "obesity_percent",
+    fill.palette = "Blues")
+```
+
+### Tesco grocery purchase data
+
+```{r tesco data}
+grocery_purchases <- read_csv(here::here("data",
+                                         "Dec_msoa_grocery.csv"))
+
+selected_variables <- grocery_purchases %>%
+  select(area_id, weight, volume, fat, 
+         carb, energy_tot, f_soft_drinks, population)
+
+h1 <- ggplot(selected_variables, aes(x=weight)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+h2 <- ggplot(selected_variables, aes(x=volume)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+h3 <- ggplot(selected_variables, aes(x=fat)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+h4 <- ggplot(selected_variables, aes(x=carb)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+h5 <- ggplot(selected_variables, aes(x=energy_tot)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+h6 <- ggplot(selected_variables, aes(x=f_soft_drinks)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+plot_grid(h1, h2, h3, h4, h5, h6)
+
+selected_variables <- selected_variables %>%
+  mutate(log_f_soft_drinks = log(f_soft_drinks))
+```
+
+Most of the variables appear normally distributed, except for f_soft_drinks, which I will do a log transformation of before using it in the regression model. 
+
+```{r join tesco and boundary}
+shape_joined <- msoa_shape %>%
+  left_join(., 
+            selected_variables, 
+            by = c("MSOA11CD" = "area_id"))
+```
+
+## Multiple Linear Regression
+
+### Check for multicollinearity
+```{r multicollinearity all}
+# check their correlations are OK
+# pearson correlation is only appropriate for interval or ratio data
+# we are only concerned about multicollinearity between predictor variables
+myvars <- shape_joined %>%
+  dplyr::select(weight,
+                volume,
+                fat,
+                carb,
+                energy_tot,
+                log_f_soft_drinks) %>%
+  st_drop_geometry()
+
+# get correlation matrix
+cormat <- cor(myvars, use="complete.obs", method="pearson")
+
+# significance test
+sig1 <- corrplot::cor.mtest(myvars, conf.level = .95)
+
+# create a correlogram
+corrplot::corrplot(cormat, type = "lower",
+                   method = "circle", 
+                   order = "hclust", 
+                   tl.cex = 0.7,
+                   p.mat = sig1$p, sig.level = .05, 
+                   col = viridis::viridis(100, option = "magma"),
+                   diag = FALSE)
+```
+
+The size of the circle reflects the strength of the relationships as captured by the Pearson correlation coefficient. Crosses indicate statistically insignificant relationships at the 95% level of confidence. 
+
+It looks like the nutritional energy of the average product (energy_tot) is highly correlated with the weight of fat and carb in the average product, so I will remove energy_tot as a predictor variable.
+
+Weight and volume are highly correlated, so I will remove volume as a predictor variable. 
+
+Fat and carb are highly correlated, so I will remove carb as a predictor variable. 
+
+I will check for multicollinearity between the remaining predictor variables.
+
+```{r multicollinearity selected}
+myvars2 <- myvars %>%
+  select(-volume, -energy_tot, -carb)
+
+cormat <- cor(myvars2, use="complete.obs", method="pearson")
+
+# significance test
+sig1 <- corrplot::cor.mtest(myvars2, conf.level = .95)
+
+# create a correlogram
+corrplot::corrplot(cormat, type="lower",
+                   method = "circle", 
+                   order = "original", 
+                   tl.cex = 0.7,
+                   p.mat = sig1$p, sig.level = .05, 
+                   col = viridis::viridis(100, option = "plasma"),
+                   diag = FALSE)
+```
+
+The remaining variables no longer exhibit strong multicollinearity, so I will refine my hypothesis as follows: 
+
+* **Hypothesis:** Higher weights of average food product purchased, higher weights of fat in the average product purchased and a higher fraction of soft drinks purchased lead to a higher percentage of the population aged 16+ with a BMI of 30+.
+
+### Check for linear relationship between x and y
+
+```{r linear relationship}
+regression_data <- shape_joined %>%
+  dplyr::select(MSOA11CD,
+                obesity_percent,
+                weight,
+                fat,
+                log_f_soft_drinks)
+
+p1 <- ggplot(regression_data, aes(x=weight, y=obesity_percent)) + 
+  geom_point() +
+  geom_smooth(method=lm) +
+  theme_classic()
+
+p2 <- ggplot(regression_data, aes(x=fat, y=obesity_percent)) + 
+  geom_point() +
+  geom_smooth(method=lm) +
+  theme_classic()
+
+p3 <- ggplot(regression_data, aes(x=log_f_soft_drinks, y=obesity_percent)) + 
+  geom_point() +
+  geom_smooth(method=lm) +
+  theme_classic()
+
+plot_grid(p1, p2, p3)
+```
+
+There seems to be a slight positive relationship between all our predictor variables and the percentage of obesity in the population. 
+
+### Linear model
+Now I will fit a linear model using the ordinary least squares method. 
+
+```{r lm}
+eq <- obesity_percent ~
+  weight + fat + log_f_soft_drinks
+
+ols_model <- lm(eq,
+                data = regression_data)
+
+# show the summary of those outputs
+tidy(ols_model)
+glance(ols_model)
+summary(ols_model)
+```
+
+The results indicate that 41.7% of the variation in the percentage of obesity can be explained by the average weight of food purchased, the weight of fat in the average product, and the fraction of soft drinks purchased. The individual p-values for all predictor variables are significant at the 99.9% level of significance. 
+
+The coefficients of all the predictor variables are positive, indicating a positive linear relationship between these variables and obesity. For example, an increase in the weight of fat (in grams) in the average product purchased is associated with a 1.37 increase in the percentage of obesity in the population, holding all other variables constant. 
+
+### Check for normally distributed residuals
+
+```{r normally distributed res}
+shape_joined <- shape_joined %>%
+  mutate(ols_model_res = residuals(ols_model))
+
+ggplot(shape_joined, aes(x=ols_model_res)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+```
+
+The residuals appear to be normally distributed. 
+
+### Check for homoscedasticity
+Homoscedasticity refers to equal error variance for all x values. That is, the errors about the regression line do not vary with x. This can be verified using a residuals vs fits plot.
+
+```{r res vs fits}
+par(mfrow = c(2, 2))
+plot(ols_model)
+```
+
+The residuals vs fitted values plot at the top left corner shows that when the fitted values are large, most of the residuals are negative. This may be a violation of the equal variance assumption, but otherwise, the other residuals show equal variance. 
+
+The Normal Q-Q plot in the top right corner can be used to check if the residuals are normally distributed. If they are, they should follow a straight line, which is the case here. 
+
+### Check for independent residuals
+
+```{r map residuals}
+tm_shape(shape_joined) +
+  tm_polygons("ols_model_res")
+```
+
+The map shows that MSOAs with positive residuals seem to be neighbouring other MSOAs with positive residuals, while those with negative residuals also exhibit some clustering. 
+
+To obtain a more quantitative measure of spatial autocorrelation, I will turn to Moran's I. 
+
+#### Moran's I
+
+```{r queen neighbours}
+# calculate the centroids of MSOAs
+centroids <- shape_joined %>%
+  st_centroid() %>%
+  st_geometry()
+
+# the poly2nb function builds a neighbours list based on regions with contiguous boundaries, that is sharing one or more boundary point
+# queen = TRUE means a single shared boundary point meets the contiguity condition
+neighbours_list <- shape_joined %>%
+  poly2nb(., queen=T)
+
+summary(neighbours_list)
+
+plot(neighbours_list, st_geometry(centroids), col="red")
+plot(shape_joined$geometry, add = T)
+```
+
+932 out of 983 MSOAs are not connected to other regions, which could present errors later in our analysis. 
+
+Thus, I will use k nearest neighbours with k set to 4 to generate the neighbours list. 
+
+```{r knn}
+# k nearest neighbours returns a matrix with the indices of points belonging to the set of the k nearest neighbours of each other
+knn_msoa <- centroids %>%
+  knearneigh(., k=4)
+
+# convert the knn object returned by knearneigh into a neighbours list
+knn_nb <- knn_msoa %>%
+  knn2nb()
+
+plot(knn_nb, st_geometry(centroids), col="blue")
+plot(shape_joined$geometry, add = T)
+
+```
+
+Now run Moran's I test using row standardised spatial weights. 
+
+```{r global moran}
+# add spatial weights to neighbours list
+msoa_spatial_weights_list <- knn_nb %>%
+  nb2listw(., style="W")
+
+# run Moran's I test for spatial autocorrelation
+global_moran <- shape_joined %>%
+  pull(ols_model_res) %>%
+  as.vector() %>%
+  moran.test(., msoa_spatial_weights_list) 
+
+global_moran
+```
+
+The global Moran’s I statistic is 0.54 (1 = clustered, 0 = no pattern, -1 = dispersed) which shows that we have some distinctive clustering.
+
+The p-value is less than 0.05, indicating that the results are statistically significant at the 95% level of significance. We can reject the null hypothesis that the model residuals are randomly distributed among MSOAs.
+
+The standard deviate (or Z-score) is positive, indicating that the spatial distribution of high values and/or low values of residuals is more spatially clustered than would be expected if underlying spatial processes were random.
+
+## Spatial Regression Models
+
+Now that we have established that spatial autocorrelation is present, there are two ways to deal with it, either by using a spatially lagged regression model or a spatial error model. 
+
+### Lagrange Multiplier Test
+I will use the lagrange multiplier test to decide whether to use the spatial lag or error model. 
+
+```{r LMtests}
+lm.LMtests(ols_model, msoa_spatial_weights_list, 
+           test = c("LMerr", "LMlag", "RLMerr", "RLMlag", "SARMA"))
+```
+
+The results show that the robust spatially lagged regression model (RLMlag) has a p-value that is much more significant than the robust spatial error model (RLMerr), so I will pick the spatially lagged regression model. 
+
+### Spatially lagged regression model
+
+```{r spatial lag model}
+# Spatial simultaneous autoregressive lag model estimation
+splag_model <- lagsarlm(eq, 
+                        data = regression_data, 
+                        msoa_spatial_weights_list)
+
+# what do the outputs show?
+tidy(splag_model)
+glance(splag_model)
+summary(splag_model)
+```
+
+The spatially lagged regression model incorporates spatial dependence explicitly by adding a “spatially lagged” dependent variable, rho, on the right-hand side of the regression equation.
+
+The results show that rho is statistically significant, and the estimate of rho (0.74) is larger than its standard error (0.02), so we can conclude that there is some spatial dependence which we should bear in mind when interpreting the results of our regression model.
+
+In our scenario, this means that the obesity percentage in one MSOA may be associated with or influenced by the obesity percentage in the four nearest neighbouring MSOAs (as defined in our neighbours list).
+ 
+To check if this is true, I will use Moran's I to identify spatial autocorrelation in the dependent variable, obesity percentage.
+
+```{r moran I obesity}
+global_moran_obesity <- shape_joined %>%
+  pull(obesity_percent) %>%
+  as.vector() %>%
+  moran.test(., msoa_spatial_weights_list) 
+
+global_moran_obesity
+```
+
+The Moran's I statistic confirms that the spatial distribution of high values and/or low values of obesity percentage across MSOAs is spatially clustered.
+
+```{r map spatial lag res}
+# write out the residuals
+shape_joined <- shape_joined %>%
+  mutate(splag_model_res = residuals(splag_model))
+
+tm_shape(shape_joined) + 
+  tm_polygons(col = "splag_model_res") +  
+  tm_compass(type = "arrow", position = c("right", "top") , size = 2) + 
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("right", "bottom")) + 
+  tm_layout(bg.color = "white", legend.outside = TRUE)
+```
+
+```{r moran I residuals}
+# check that the residuals from the spatially lagged model are now no longer exhibiting spatial autocorrelation
+splag_moran <- moran.test(shape_joined$splag_model_res, 
+                          msoa_spatial_weights_list)
+
+splag_moran
+```
+
+The results of Moran’s I test for spatial autocorrelation show that the residuals of the spatially lagged regression model are no longer spatially autocorrelated, as the Moran I statistic is close to 0. However, this result is not statistically significant, as the p-value is large.
+
+## Geographically Weighted Regression
+Perhaps the spatial autocorrelation that we have observed for obesity percentages in London MSOAs is indicative of some local variation that the global OLS model has failed to capture. 
+
+GWR explores how the relationship between a dependent variable (Y) and one or more independent variables (the Xs) might vary geographically.
+
+```{r gwr bandwidth}
+centroids2 <- st_coordinates(centroids)
+
+shape_joined2 <- cbind(shape_joined, centroids2)
+
+# find optimal kernel bandwidth
+GWR_bandwidth <- gwr.sel(eq,
+                         data = shape_joined2,
+                         coords = cbind(shape_joined2$X,
+                                        shape_joined2$Y),
+                        # provide an adaptive bandwidth as opposed to a fixed bandwidth
+                        adapt = TRUE)
+
+GWR_bandwidth
+
+```
+The optimal bandwidth is about 0.0034 meaning 0.34% of all the total spatial units should be used for the local regression based on k-nearest neighbours. This is about 3 of the 983 MSOAs.
+
+
+```{r fit gwr model}
+# fit the gwr model based on adaptive bandwidth
+gwr_abw <- gwr(eq,
+               data = shape_joined2, 
+               coords = cbind(shape_joined2$X, shape_joined2$Y), 
+               adapt = GWR_bandwidth, 
+               # matrix output
+               hatmatrix = TRUE, 
+               # standard error
+               se.fit = TRUE)
+
+# print the results of the model
+gwr_abw
+
+results <- as.data.frame(gwr_abw$SDF)
+# names(results)
+```
+
+The coefficients for the weight of fat in the average food product range from a minimum value of -10.6 (1 gram increase in fat resulting in a drop in obesity percentage of 10.6) to +8.16 (1 gram increase in fat resulting in a increase in obesity percentage of 8.16). 
+
+For half of the MSOAs in the dataset, as the weight of the average food product increases by 1 gram, the obesity percentage will increase between 0.012 and 0.067 points (the inter-quartile range between the 1st Qu and the 3rd Qu).
+
+```{r save results}
+# save localR2 and coefficients to original data frame
+shape_joined2$abw_localR2 <- results$localR2
+
+shape_joined2$coef_weight <- results$weight
+
+shape_joined2$coef_fat <- results$fat
+
+shape_joined2$coef_log_f_soft_drinks <- results$log_f_soft_drinks
+```
+
+### Map local R2
+
+```{r map local r2}
+# map local R2
+legend_title = expression("Adaptive bandwidth: Local R2")
+
+map_abgwr1 = tm_shape(shape_joined2) +
+  tm_fill(col = "abw_localR2", title = legend_title, 
+          palette = "Oranges", style = "cont") +
+  tm_borders(col = "gray", lwd = .1) + 
+  tm_compass(type = "arrow", position = c("right", "top") , size = 2) + 
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("right", "bottom")) +
+  tm_layout(bg.color = "white", legend.outside = TRUE)
+
+map_abgwr1
+```
+
+The local R-squared values range from 0.2 to 0.8, with several MSOAs near the center having higher R-squared values. 
+
+### Map the coefficients
+
+```{r map coef}
+# weight
+legend_title = expression("Weight of average food product (grams)")
+
+map_abgwr2 = tm_shape(shape_joined2) +
+  tm_fill(col = "coef_weight", title = legend_title, 
+          palette = "RdBu", style = "cont") + 
+  tm_borders(col = "gray", lwd = .1)  +
+  tm_compass(type = "arrow", position = c("right", "top") , size = 2) +
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) + 
+  tm_layout(bg.color = "white", legend.outside = TRUE)
+
+map_abgwr2
+
+# fat
+legend_title = expression("Weight of fat in the average product (grams)")
+
+map_abgwr3 = tm_shape(shape_joined2) +
+  tm_fill(col = "coef_fat", title = legend_title, 
+          palette = "RdBu", style = "cont") + 
+  tm_borders(col = "gray", lwd = .1)  + 
+  tm_compass(type = "arrow", position = c("right", "top") , size = 2) +
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) + 
+  tm_layout(bg.color = "white", legend.outside = TRUE) 
+
+map_abgwr3
+
+# soft drinks
+legend_title = expression("Log(fraction of soft drinks purchased)")
+
+map_abgwr4 = tm_shape(shape_joined2) +
+  tm_fill(col = "coef_log_f_soft_drinks", title = legend_title, 
+          palette = "RdBu", style = "cont") + 
+  tm_borders(col = "gray", lwd = .1)  + 
+  tm_compass(type = "arrow", position = c("right", "top") , size = 2) +
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) + 
+  tm_layout(bg.color = "white", legend.outside = TRUE) 
+
+map_abgwr4
+```
+
+The coefficients for the weight of the average food product show that the relationship between this variable and obesity percentage is positive for most MSOAs, especially in some central areas towards the south of the river. 
+
+Interestingly, on the outskirts of London, the relationship between weight of the average food product and obesity is negative (indicated in red on the map), which is unexpected. There could be some other factors at play that are unrelated to diets, perhaps related to lifestyle habits.
+
+The coefficients for the weight of fat in the average product show that some MSOAs have negative coefficients, meaning that an increase in the weight of fat in the average product leads to a decrease in obesity percentage. 
+
+The coefficients for the log transformed fraction of soft drinks purchased show that there is mostly a positive relationship between this variable and obesity percentage across MSOAs. 
+
+### Assessing statistical significance
+Roughly, if a coefficient estimate has an absolute value of t greater than 1.96 and the sample is sufficiently large, then it is statistically significant.
+
+```{r t statistic weight}
+# compute t statistic
+shape_joined2$t_weight = results$weight / results$weight_se
+
+# categorise t values
+shape_joined2$t_weight_cat <- cut(shape_joined2$t_weight,
+                     breaks = c(min(shape_joined2$t_weight), 
+                              -1.96, 1.96, 
+                              max(shape_joined2$t_weight)),
+                     labels = c("sig","nonsig", "sig"))
+
+# map statistically significant coefs
+legend_title = expression("Weight of avg food product: significant")
+
+map_sig_weight = tm_shape(shape_joined2) + 
+  tm_fill(col = "t_weight_cat", title = legend_title, 
+          legend.hist = TRUE, midpoint = NA, 
+          textNA = "", colorNA = "white") +  
+  tm_borders(col = "grey", lwd = .1)  + 
+  tm_compass(type = "arrow", position = c("right", "top") , size = 2) + 
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("right", "bottom")) + 
+  tm_layout(bg.color = "white", legend.outside = TRUE)
+
+map_sig_weight
+```
+
+For slightly more than half of the MSOAs, the results for the weight of the average food product are statistically significant in explaining obesity percentages. 
+
+```{r t statistic fat}
+# compute t statistic
+shape_joined2$t_fat = results$fat / results$fat_se
+
+# categorise t values
+shape_joined2$t_fat_cat <- cut(shape_joined2$t_fat,
+                     breaks = c(min(shape_joined2$t_fat), 
+                              -1.96, 1.96, 
+                              max(shape_joined2$t_fat)),
+                     labels = c("sig","nonsig", "sig"))
+
+# map statistically significant coefs 
+legend_title = expression("Weight of fat in avg food product: significant")
+
+map_sig_fat = tm_shape(shape_joined2) + 
+  tm_fill(col = "t_fat_cat", title = legend_title, 
+          legend.hist = TRUE, midpoint = NA, 
+          textNA = "", colorNA = "white") +  
+  tm_borders(col = "grey", lwd = .1)  + 
+  tm_compass(type = "arrow", position = c("right", "top") , size = 2) + 
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("right", "bottom")) + 
+  tm_layout(bg.color = "white", legend.outside = TRUE)
+
+map_sig_fat
+```
+
+This map shows that the weight of fat in the average food product is not statistically significant for most of the MSOAs, so we should take this into account when interpreting the results of this variable in the GWR. 
+
+## Reflection
+In conclusion, I have looked at three dietary factors and their relationship with obesity percentages, namely, the weight of the average food product, the weight of fat in the average food product, and the fraction of soft drinks purchased. 
+
+I have used three different models to model the relationship between these factors and obesity, namely, the ordinary least squares multiple linear regression model, the spatially lagged regression model and finally, the geographically weighted regression model. 
+
+In general, the results show that higher weights of the average food product and fat in the average food product are associated with higher obesity percentages, so policymakers can look into ways to encourage people to reduce these numbers to combat obesity.

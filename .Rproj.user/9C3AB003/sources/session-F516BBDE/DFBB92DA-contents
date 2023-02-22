@@ -1,0 +1,425 @@
+---
+title: "Name: Rahmadita Listianingrum"
+author: 
+- |
+    | Student number: 22221267
+date: "16/12/22"
+output: html_document
+---
+# Originality declaration  
+
+I, [**Rahmadita Listianingrum**], confirm that the work presented in this assessment is my own. Where information has been derived from other sources, I confirm that this has been indicated in the work.
+
+date: [16 December 2022]
+
+# Initial project scope
+
+## Research Background
+The New York Police Department (NYPD) are conducting a review of their stop, question and frisk (SQF) policy. This is because 
+
+1. Stop, Question, and Frisk is a third type of street encounter by the police where the officer temporarily detains a person, even using reasonable force to do so. The officer must have a reasonable suspicion that you are committing, have committed, or are about to commit a crime .
+
+2. This research uses the SQF data to analyse spatial patterns in SQF arrested case that found weapon
+
+3. Choosing arrested case with weapon because of the trend of crime with illegal weapon increasing in the past years
+
+## Research Question
+Do SQF Arrested Case with weapon in New York City exhibit spatial patterns?
+
+## Hypothesis
+H0: SQF Arrested Case with weapon in New York City exhibit complete spatial randomness
+
+H1: SQF Arrested Case with weapon in New York City tend to have spatial patterns and clustered
+
+## Datasets
+**1. NYC Police Precinct**
+
+- This dataset is downloaded from https://data.cityofnewyork.us/Public-Safety/Police-Precincts/78dh-3ptz
+
+- This data contains multipolygons of GIS boundaries of  NYC Police Precinct
+
+- The dataset have 77 spatial units for NYC area
+
+- The CRS is in this shapefile is in WGS84
+
+**2. SQF data**
+
+- This dataset is downloaded from https://www1.nyc.gov/site/nypd/stats/reports-analysis/stopfrisk.page
+
+- This data contains spatial information (stop_location_x and stop_location_y) and it is in NAD83 in ft (EPSG 2908)
+
+- Choose the latest 2021 data because want to see latest pattern
+
+## Analysis
+**1. Spatial Autocorrelation**
+
+- Use Queen's to see neighbour because adjecency is important in this case
+
+- Row standardisation is used because it is best for contiguity based
+
+- Conduct Global Moran's I to see autocorrelation
+
+- Conduct Getis Ord General G to see high/low density values tend to be clustered/not
+
+- Conduct Local Moran's I to see local autocorrelation
+
+- Conduct Local Getis Ord General G to see high/low density pattern
+
+**2. Point Pattern Analysis**
+
+- Choosing precinct area based on spatial autocorrelation result
+
+- Find hotspot area using KDE
+
+- Test Ripley's K 
+
+- Run the KNN distplot
+
+- Run DBSCAN
+
+## Assumptions
+- There is no clustering in SQF arrested cases with weapon in NYC
+
+- All precinct are included in spatial autocorrelation analysis
+
+## Limitations
+- This is only the first stage of analysis to describe spatial patterns in cases arrested with weapon based on the SQF data
+
+# Libraries
+Load all the libraries needed for this project
+```{r library}
+library(tidyverse)
+library(tmap)
+library(tmaptools)
+library(rgdal)
+library(broom)
+library(mapview)
+library(crosstalk)
+library(sf)
+library(sp)
+library(spdep)
+library(car)
+library(fs)
+library(janitor)
+library(here)
+library(OpenStreetMap)
+library(RColorBrewer)
+library(spatstat)
+library(readxl)
+```
+
+# Data Loading, Wrangling, and Pre-processing
+**NYC Police Precinct Data**
+Load the NYC Police Precinct data and ptoject it
+```{r nyc_community_district}
+precinct <- st_read("data/Police Precincts/geo_export_62973cd2-46df-4e18-9a9d-7ea8b3d8d456.shp")%>%
+  st_transform(.,32118)%>%
+  clean_names()
+```
+Plot the Police Precincts
+```{r plot_comm_dist}
+tmap_mode("plot")
+qtm(precinct)
+```
+**SQF Data 2021**
+Read the SQF data
+```{r sqf}
+sqf <- read_excel("data/sqf-2021.xlsx", na=" ")%>%
+  clean_names()
+```
+Check the sqf data type
+```{r sqf_datatype}
+Datatypelist <- sqf %>% 
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+Datatypelist
+```
+Convert the SQF data to sf object and transform the data ffrom ft to m
+```{r}
+sqf_sf <- sqf %>%
+  st_as_sf(., coords = c("stop_location_x", "stop_location_y"), crs = 2908) %>%
+   st_transform(., 32118) #NY Long Island in m
+```
+
+Plot both police precinct and sqf data together to check
+```{r}
+tmap_mode("plot")
+tm_shape(precinct) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(sqf_sf) +
+  tm_dots(col = "blue")
+```
+This plot shows our data and shapefile are correct
+
+Subset the data and enquire only arrested cases with weapon found
+```{r subsetpointdata}
+sqf_sub<-sqf_sf%>%
+  filter(str_detect(stop_was_initiated, "^Based"))%>%
+  filter(str_detect(suspect_arrested_flag, "Y"))%>%
+  filter(str_detect(weapon_found_flag, "Y"))%>%
+  clean_names()
+```
+Plot the subset data with the precinct area
+```{r subsetcommdist}
+tmap_mode("plot")
+tm_shape(precinct) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(sqf_sub) +
+  tm_dots(col = "blue")
+```
+Left join the data to precinct
+```{r joined}
+ joined <- precinct  %>%
+  st_join(., sqf_sub) %>% #left join
+  add_count(precinct) %>% #counting the number police precinct
+  mutate(area = st_area(.)) %>% #compute the area
+  mutate(density = n/area) #calculate density
+```
+Plot the joined data
+```{r plot joined}
+tmap_mode("plot")
+tm_shape(precinct) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(joined) +
+  tm_dots(col = "blue")
+```
+Summarise the data by precinct
+```{r}
+joined_data <- joined %>%
+  group_by(precinct) %>%
+  summarise(precinct = first(precinct),
+            count= first(n),
+            density = first(density))
+```
+
+Plot to check the joined data
+```{r plotdensity}
+tmap_mode("view")
+tm_density <- tm_shape(joined_data) +
+    tm_polygons("density",
+        style="jenks",
+        palette="PuBu",
+        midpoint=NA,
+        popup.vars=c("precinct", "density"),
+        title="SQF Arrested Cases with Weapon 2021 (#/m^2)")
+tm_density
+```
+Now our joined data is ready for making analysis
+
+# Spatial Autocorrelation
+Spatial Autocorrelation test to see clustering
+
+Calculate the centroid
+```{r centroid}
+centroids <- joined_data %>%
+  st_centroid() %>%
+  st_geometry()
+```
+Create neighbours list
+```{r neighbourslist}
+neighbours <- joined_data %>%
+  poly2nb(., queen=T) 
+```
+Using Queen's contiguity based neighbours because in this case adjacency might influence the result
+
+Visualise the neighbours list
+```{r neighbourslistviz}
+plot(neighbours, st_geometry(centroids), col="red")
+plot(joined_data$geometry, add = T)
+```
+Create spatial weight matrix using row standardisation
+```{r weightmatrix}
+weight_matrix <- neighbours %>%
+  nb2listw(., style = "W", zero.policy = TRUE)
+zero.policy = TRUE
+```
+Compute the Moran's I global statistic
+```{r globalmoransi}
+global_moran <- joined_data %>%
+  pull(density) %>%
+  as.vector()%>%
+  moran.test(., weight_matrix)
+global_moran 
+```
+The Moran's I statistic = 0.431 means we have autocorrelation
+
+Compute the Getis Ord General G global statistic
+```{r globalg}
+global_g <- joined_data %>%
+  pull(density) %>%
+  as.vector()%>%
+  globalG.test(., weight_matrix)
+global_g
+```
+The General G statistic result is 2.143e-02 larger than expectation (1.315e-02) means high density values are tending to cluster
+
+Run Local Moran's I
+```{r localmoransi}
+local_moran <- joined_data %>%
+  pull(density) %>%
+  as.vector() %>%
+  localmoran(., weight_matrix) %>%
+  as_tibble()
+```
+To assess how unlikely it is that the value will be attained if the null hypothesis of random distribution is true, combine local moran's I density with the connected data and choose the z score to visualise.
+```{r localmoransidens}
+joined_data <- joined_data %>%
+  mutate(density_Iz = as.numeric(local_moran$Z.Ii))
+```
+Visualise local Moran's I
+```{r localmoransiviz}
+breaks = c(-1000, -2.58, -1.96, -1.65, 1.65, 1.96, 2.58, 1000) #based on one tail p-value
+MoranColours <- rev(brewer.pal(8, "RdGy"))
+
+tm_Moran <- tm_shape(joined_data)+
+  tm_polygons("density_Iz", style = "fixed", breaks = breaks, 
+              palette = MoranColours, midpoint=NA, title = "Z value for Moran's I - SQF Arrested Cases with Weapon NYC")
+tm_Moran
+```
+This map shows the density of sqf arrested case with weapon in some of the precincts in NYC exhibits strong and positive spatial autocorrelation.
+
+Run the local G
+```{r localg}
+local_g <- joined_data %>%
+  pull(density) %>%
+  as.vector() %>%
+  localG(., weight_matrix)
+```
+To assess how unlikely it is that the value will be attained if the null hypothesis of random distribution is true, combine local g density with the connected data and choose the z score to visualise.
+```{r localgdens}
+joined_data <- joined_data %>%
+  mutate(density_Gz = as.numeric(local_g))
+```
+Visualise local General G
+break based on one tail p-value - 99%: 2.58, 95%: 1.96, 90%: 1.65
+```{r localgviz}
+breaks = c(-1000, -2.58, -1.96, -1.65, 1.65, 1.96, 2.58, 1000) #based on one tail p-value
+GeneralColours <- rev(brewer.pal(8, "RdBu"))
+
+tm_general <- tm_shape(joined_data)+
+  tm_polygons("density_Gz", style = "fixed", breaks = breaks, 
+              palette = GeneralColours, midpoint=NA, title = "Z value for general G - SQF Arrested Cases with Weapon NYC")
+tm_general
+```
+This map shows that high density values of NYC's SQF arrested case with weapon tend to be clustered in some precinct
+
+Look at both maps side-by-side
+```{r mapsmoransig}
+tmap_arrange(tm_Moran, tm_general, ncol=2)
+```
+Both maps shows strong autocorrelation and high density tend to be clustered in precinct 25, 40, 42, 44, 46, 48, 83, 81, and 87.
+
+# Point Pattern Analysis
+Choosing 25, 40, 42, 44, 46, 48, 83, 81, 87 on the spatial autocorrelation result.
+```{r hotspot}
+joined_sub <- joined_data %>%
+  filter(precinct %in% c(25, 40, 42, 44, 46, 48, 83, 81, 87))
+
+sqf_sub2 <- sqf_sub[joined_sub,]
+
+#Visualise
+tm_shape(joined_sub)+
+  tm_polygons(col=NA)+
+  tm_shape(sqf_sub2)+
+  tm_dots(col="red")
+```
+Create ppp object
+```{r pppobject}
+window <- as.owin(joined_sub)
+plot(window)
+
+sqf_sub_sp <- sqf_sub2 %>%
+  as(., "Spatial")
+sqf_sub_ppp <- ppp(x = sqf_sub_sp@coords[,1], y = sqf_sub_sp@coords[,2],
+                      window = window)
+```
+Visualise study area
+```{r pppviz}
+sqf_sub_ppp %>%
+  plot(., pch=16, cex=0.5, main="SQF points for point pattern analysis")
+```
+Using KDE to visualise trend over the Manhattan Area
+```{r kde}
+sqf_sub_ppp %>% 
+  density(., sigma=500) %>% #arbitrarily choose sigma=500
+  plot()
+```
+The plot shows clustering happens and can be seen in around precinct 42, 40 and 25 (not including island)
+
+Conduct Ripley's K
+```{r kfunction}
+K <- sqf_sub_ppp %>%
+  Kest(., correction = "border") %>%
+  plot()
+```
+Ripley's K result doesn't show distinct clusters founded
+
+Conduct DBSCAN
+```{r dataframe}
+sqf_sub_df <- sqf_sub_sp %>% #df for DBSCAN
+  coordinates(.) %>%
+  as.data.frame()
+```
+KNN distance plot
+```{r knndistplot4}
+sqf_sub_df %>% dbscan::kNNdistplot(., k=4)
+```
+K=4 nearest neighbour, this plot doesn't really show the distinct clustered.
+
+Run DBSCAN choosing an arbitrary scale = 400 m because the result of ripley's k and knn are not significant.
+```{r dbscan}
+dbscan <- sqf_sub_df %>%
+  fpc::dbscan(., eps = 400, MinPts = 4)
+```
+Visualise DBSCAN
+```{r dbscanviz}
+plot(dbscan, sqf_sub_df, main = "DBSCAN results for SQF in NYC 2021", frame=F)
+plot(joined_data$geometry, add=T)
+```
+Save this clusters info back into our dataframe
+```{r savedbscan}
+sqf_sub_df <- sqf_sub_df %>%
+  mutate(dbcluster = dbscan$cluster)
+```
+DBSCAN output with chulls
+```{r dbscanchulls}
+chulls <- data.frame()
+for (cluster in 1:max(sqf_sub_df$dbcluster)) {
+  cluster_data <- sqf_sub_df %>%
+    filter(dbcluster == cluster)
+  ch <- chull(cluster_data$coords.x1, cluster_data$coords.x2)
+  chulls <- chulls %>%
+    bind_rows(cluster_data[c(ch), ])
+} 
+chulls <- chulls %>% filter(dbcluster>=1)
+```
+Add basemap to DBSCAN
+```{r dbscanbasemap}
+result <- joined_data %>%
+  st_transform(., 4326) %>% st_bbox()
+basemap <- OpenStreetMap::openmap(c(40.49, -74.25), c(40.95, -73.70), zoom = NULL, "stamen-toner")
+basemap_NAD83 <- openproj(basemap, projection="+init=epsg:32118") #projecting the map to NAD83
+```
+Map the clusters on the basemap
+```{r clustermap}
+main <- autoplot.OpenStreetMap(basemap_NAD83) +
+  geom_point(data = sqf_sub_df, aes(coords.x1, coords.x2, colour = dbcluster, fill=dbcluster))+
+  geom_polygon (data = chulls, aes(coords.x1, coords.x2, group=dbcluster, fill=dbcluster, alpha = 0.5))
+```
+Plot the map
+```{r plotclustermap}
+main
+```
+The map shows the  largest cluster is located around the Bronx area
+
+# Conclusion/Reflection
+- Most of arrested case with weapon in NYC are spatially autocorrelated with high density tend to clustered together in Bronx area
+
+- Point pattern analysis in NYC shows clusters in Bronx and Manhattan which are the precinct that are neighbours (Precinct 25, 40, 42, 44, 46, 48)
+
+- Further analysis including comparation of other weapons and different boundaries can be conducted
+
+- Because of time limitation the map is standard map further proper visualisation can be conducted

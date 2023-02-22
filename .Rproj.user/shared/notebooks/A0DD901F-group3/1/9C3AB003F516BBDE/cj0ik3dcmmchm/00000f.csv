@@ -1,0 +1,8 @@
+"0","eq <- samhi_dec ~"
+"0","  imd_score + single_hc"
+"0",""
+"0","ols_model <- lm(eq,"
+"0","                data = regression_data)"
+"0",""
+"0","# show the summary of those outputs"
+"0","tidy(ols_model)"

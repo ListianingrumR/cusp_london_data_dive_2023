@@ -1,0 +1,4 @@
+"0","df <- join%>%"
+"0","  select(.,LSOA11CD, samhi_dec, area_population_density_density_number_of_persons_per_hectare_measures_value, imd_score, single_hc)%>%"
+"0","  rename(pop_dens=area_population_density_density_number_of_persons_per_hectare_measures_value)%>%"
+"0","  clean_names()"
