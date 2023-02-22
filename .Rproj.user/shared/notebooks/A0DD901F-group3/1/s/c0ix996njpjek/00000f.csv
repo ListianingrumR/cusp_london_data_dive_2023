@@ -1,0 +1,4 @@
+"0","hc <- read_csv(here::here(""cusp_london_data_dive_2023"",""data"",""household.csv""),locale=locale(encoding = ""latin1"")) %>%"
+"0","  clean_names()"
+"2","Error: '/Users/listianingrumr/Documents/CASA/CUSP/cusp_london_data_dive_2023/cusp_london_data_dive_2023/data/household.csv' does not exist.
+"

@@ -1,0 +1,306 @@
+# Severe Mental Illness and Social issues in London
+
+```{r warning=FALSE, message=FALSE}
+library(sf)
+library(tidyverse)
+library(tmap)
+library(janitor)
+library(here)
+library(broom)
+library(car)
+library(cowplot)
+library(corrr)
+library(sp)
+library(spdep)
+library(spgwr)
+library(spatialreg)
+library(readxl)
+```
+
+## Project Scope
+
+**Research question**
+
+-   Is there any relationship between CMD and social issues such as population density, deprivation, and household composition in London?
+
+**Hypothesis**
+
+-   Higher population density and deprivation rate lead to a higher number of SMI patient in London
+-   The more diverse ethnicity the lower number of SMI patient
+
+**Analysis**
+
+-   Map SMI index across London LSOA
+-   Load population density, deprivation, and ethnicity data
+-   Conduct multiple linear regression with SMI index as the dependent variable and selected social issues as independent variables
+-   Experiment with the spatial lag and spatial error models, comparing their results
+-   Run geographically weighted regression (GWR) to see if there is local variation that is not captured by the global model
+
+**Assumptions**
+
+-   Assume that data on food purchases does not vary too much over time, such that even though the data was collected in 2015, it can be used to explain obesity rates that were modelled for 2006 to 2008.
+-   Assume that the modelled estimates of obesity are an accurate representation of the actual obesity percentages in MSOAs.
+
+## Data
+
+[Statistical GIS Boundary Files for London](https://data.london.gov.uk/dataset/statistical-gis-boundary-files-london)
+
+-   This data contains various GIS boundary files for London at different spatial aggregation units, including Lower Super Output Area (LSOA), Middle Super Output Area (MSOA), Wards and Boroughs.
+-   For this analysis, we will use LSOA data so that the spatial units correspond with the data available on SMI index
+-   Transform the data to a projected coordinate reference system, the British National Grid.
+
+[SMI index data at LSOA level 2011](https://pldr.org/dataset/2noyv/small-area-mental-health-index-samhi)
+
+-   The SAMHI is a composite annual measure of population mental health for each Lower Super Output Area (LSOA) in England. The SAMHI combines data on mental health from multiple sources (NHS-Mental health related hospital attendances, Prescribing data -- Antidepressants, QOF - depression, and DWP - Incapacity benefit and Employment support allowance for mental illness) into a single index.
+-   The SAMHI index contains 2011-2019 data based on LSOA level in all England
+
+[Population Density Data 2011 Census](_)
+
+-   This data based on the 2011 Census and we choose LSOA
+-   We will choose these columns:
+    -   geography_code
+    -   area_population_density_density_number_of_persons_per_hectare_measures_value
+
+### LSOA boundary data
+
+```{r LSOA boundary}
+lsoa <- st_read(here::here("data", "statistical-gis-boundaries-london","ESRI", "LSOA_2011_London_gen_MHW.shp")) %>%
+  st_transform(., 27700)
+
+summary(lsoa)
+
+qtm(lsoa)
+```
+
+There are 4835 LSOA in London in 2011.
+
+### SMI index data
+
+```{r SAMHI index}
+samhi_index <- read_csv(here::here("data","samhi_21_01_v4.00_2011_2019_LSOA_tall.csv"),locale=locale(encoding = "latin1")) %>%
+  clean_names()
+```
+
+```{r}
+# filter 2019 and SAMHI index column
+samhi_2011 <- samhi_index %>%
+  select(lsoa11,year,samhi_dec)%>%
+  filter(str_detect(year, "2011"))
+
+summary(samhi_2011)
+```
+
+```{r}
+# join SAMHI index to LSOA boundary
+samhi <- lsoa %>%
+  left_join(.,
+            samhi_2011, 
+            by = c("LSOA11CD" = "lsoa11"))
+
+Datatypelist <- samhi %>% 
+  st_drop_geometry() %>%
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+# plot SAMHI index (deciles)
+#qtm(samhi, 
+#    fill = "samhi_dec",
+#    fill.palette = "Blues")
+```
+
+### Population Density Data
+
+```{r pop_density}
+pd <- read_csv(here::here("data","population_density.csv"),locale=locale(encoding = "latin1"))%>%
+  clean_names()
+```
+
+```{r}
+# filter 2011 and population density column
+pd_2011 <- pd %>%
+  select(geography_code, area_population_density_density_number_of_persons_per_hectare_measures_value)
+
+summary(pd_2011)
+```
+
+### Deprivation
+
+```{r deprivation}
+depriv <- read_excel(here::here("data","deprivation.xls"))%>%
+  clean_names()
+```
+
+```{r}
+# filter 2011 and population density column
+depriv_2011 <- depriv %>%
+  select(lsoa_code, imd_score)
+
+summary(depriv_2011)
+```
+
+### Ethnicity
+
+### Household
+```{r}
+hc <- read_csv(here::here("data","household.csv"),locale=locale(encoding = "latin1")) %>%
+  clean_names()
+```
+
+```{r}
+hc <- read_csv(here::here("data","household.csv"),locale=locale(encoding = "latin1")) %>%
+  clean_names()
+```
+
+```{r}
+hc_2011 <- hc%>%
+  mutate(single_hc=household_composition_one_person_household_measures_value/household_composition_all_categories_household_composition_measures_value)%>%
+  select(geography_code, single_hc)
+```
+
+### Predictors
+
+```{r}
+# join population density, IMD, and ethnicity to LSOA boundary
+predictors <- lsoa %>%
+  left_join(.,
+            samhi_2011, 
+            by = c("LSOA11CD"="lsoa11"))%>%
+  left_join(.,
+            pd_2011, 
+            by = c("LSOA11CD"="geography_code"))%>%
+  left_join(.,
+            depriv_2011, 
+            by = c("LSOA11CD"="lsoa_code"))%>%
+  left_join(.,
+            hc_2011, 
+            by = c("LSOA11CD"="geography_code"))
+```
+
+```{r}
+# join population density, IMD, and ethnicity to LSOA boundary
+predictors <- samhi_2011 %>%
+  left_join(.,
+            pd_2011, 
+            by = c("lsoa11"="geography_code"))%>%
+  left_join(.,
+            depriv_2011, 
+            by = c("lsoa11"="lsoa_code"))%>%
+  left_join(.,
+            hc_2011, 
+            by = c("lsoa11"="geography_code"))
+```
+
+```{r}
+df <- predictors%>%
+  select(.,lsoa11, samhi_dec, area_population_density_density_number_of_persons_per_hectare_measures_value, imd_score, single_hc)%>%
+  clean_names()
+```
+
+```{r}
+write.csv(df, file='./data.csv')
+```
+
+```{r}
+Datatypelist <- df %>% 
+  st_drop_geometry() %>%
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+```
+
+```{r}
+h1 <- ggplot(predictors, aes(x=area_population_density_density_number_of_persons_per_hectare_measures_value)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+h2 <- ggplot(predictors, aes(x=imd_score)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+plot_grid(h1,h2)
+```
+
+```{r}
+log_predictors <- predictors %>%
+  mutate(log_density = log(area_population_density_density_number_of_persons_per_hectare_measures_value))%>%
+  mutate(log_imd_score = log(imd_score))
+```
+
+```{r}
+h1 <- ggplot(log_predictors, aes(x=log_density)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+h2 <- ggplot(log_predictors, aes(x=log_imd_score)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+plot_grid(h1,h2)
+```
+
+```{r}
+# plot population density
+map_samhi <- tm_shape(predictors)+
+  tm_fill(col="samhi_dec", 
+          title = "London Common Mental Health index 2011",
+          style = "cont",
+          textNA = "No data",
+          colorNA = "white", 
+          palette = "RdBu")+
+  tm_borders(col = "gray", lwd = .1) +
+  tm_compass(type = "arrow", position = c("right", "top") , size = .5) +
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) +
+  tm_layout(bg.color = "white", legend.outside = TRUE)
+map_samhi
+```
+
+```{r}
+# plot population density
+map_pd <- tm_shape(predictors)+
+  tm_fill(col="imd_score", 
+          title = "London Deprivation Index 2011",
+          style = "cont",
+          textNA = "No data",
+          colorNA = "white", 
+          palette = "RdBu")+
+  tm_borders(col = "gray", lwd = .1) +
+  tm_compass(type = "arrow", position = c("right", "top") , size = .5) +
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) +
+  tm_layout(bg.color = "white", legend.outside = TRUE)
+map_pd
+```
+
+```{r}
+# plot deprivation index (IMD)
+map_imd <- tm_shape(predictors)+
+  tm_fill(col="area_population_density_density_number_of_persons_per_hectare_measures_value", 
+          title = "London Deprivation Index 2011",
+          breaks = c(0, 10 ,20, 30, 40, 50, 60,70),
+          style = "fixed",
+          textNA = "No data",
+          colorNA = "white", 
+          palette = "RdBu")+
+  tm_borders(col = "gray", lwd = .1) +
+  tm_compass(type = "arrow", position = c("right", "top") , size = .5) +
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) +
+  tm_layout(bg.color = "white", legend.outside = TRUE)
+map_imd
+```
+
+Most of the variables appear normally distributed, except for f_soft_drinks, which I will do a log transformation of before using it in the regression model.
+
+```{r join tesco and boundary}
+shape_joined <- msoa_shape %>%
+  left_join(., 
+            selected_variables, 
+            by = c("MSOA11CD" = "area_id"))
+```
+
+## Multiple Linear Regression

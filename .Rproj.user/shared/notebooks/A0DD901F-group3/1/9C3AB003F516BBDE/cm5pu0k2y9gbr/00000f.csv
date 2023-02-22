@@ -1,0 +1,3 @@
+"0","df <- predictors%>%"
+"0","  select(.,lsoa11, samhi_dec, area_population_density_density_number_of_persons_per_hectare_measures_value, imd_score, single_hc)%>%"
+"0","  clean_names()"
