@@ -147,7 +147,7 @@ head(depriv)
 ```{r}
 # filter 2011 and population density column
 depriv_2011 <- depriv %>%
-  select(.,codes, employment_rate,median_annual_household_income_estimate)%>%
+  select(.,codes, unemployment_rate,median_annual_household_income_estimate)%>%
   rename(annual_income=median_annual_household_income_estimate)
 
 summary(depriv_2011)
@@ -225,8 +225,8 @@ join <- lsoa %>%
             pd_2011, 
             by = c("LSOA11CD"="geography_code"))%>%
   left_join(.,
-            depriv_2015, 
-            by = c("LSOA11CD"="lsoa_code_2011"))%>%
+            depriv_2011, 
+            by = c("LSOA11CD"="codes"))%>%
   left_join(.,
             hc_2011, 
             by = c("LSOA11CD"="geography_code"))
@@ -234,7 +234,7 @@ join <- lsoa %>%
 
 ```{r}
 df <- join%>%
-  select(.,LSOA11CD, samhi_dec, area_population_density_density_number_of_persons_per_hectare_measures_value, imd_score, single_hc)%>%
+  select(.,LSOA11CD, samhi_dec, area_population_density_density_number_of_persons_per_hectare_measures_value, unemployment_rate, annual_income, single_hc)%>%
   rename(pop_dens=area_population_density_density_number_of_persons_per_hectare_measures_value)%>%
   clean_names()
 ```
@@ -254,7 +254,7 @@ h1 <- ggplot(df, aes(x=pop_dens)) +
                  fill = "lightblue") +
   theme_bw()
 
-h2 <- ggplot(df, aes(x=imd_score)) +
+h2 <- ggplot(df, aes(x=unemployment_rate)) +
   geom_histogram(color = "darkblue",
                  fill = "lightblue") +
   theme_bw()
@@ -264,7 +264,12 @@ h3 <- ggplot(df, aes(x=single_hc)) +
                  fill = "lightblue") +
   theme_bw()
 
-plot_grid(h1,h2,h3)
+h4 <- ggplot(df, aes(x=annual_income)) +
+  geom_histogram(color = "darkblue",
+                 fill = "lightblue") +
+  theme_bw()
+
+plot_grid(h1,h2,h3,h4)
 ```
 
 Most of the variables appear normally distributed, except for population density.
@@ -278,7 +283,7 @@ Most of the variables appear normally distributed, except for population density
 # pearson correlation is only appropriate for interval or ratio data
 # we are only concerned about multicollinearity between predictor variables
 myvars <- df %>%
-  dplyr::select(samhi_dec,pop_dens,imd_score,single_hc) %>%
+  dplyr::select(samhi_dec,pop_dens,unemployment_rate,single_hc,annual_income) %>%
   st_drop_geometry()
 
 # get correlation matrix
@@ -303,7 +308,7 @@ It looks like pop_dens is highly correlated with imd_score and less correlated w
 
 ```{r multicollinearity selected}
 myvars2 <- myvars %>%
-  select(samhi_dec,imd_score,single_hc)
+  select(samhi_dec,unemployment_rate,pop_dens,single_hc)
 
 cormat <- cor(myvars2, use="complete.obs", method="pearson")
 
@@ -322,7 +327,7 @@ corrplot::corrplot(cormat, type="lower",
 
 The remaining variables no longer exhibit strong multicollinearity, so I will refine my hypothesis as follows: 
 
-* **Hypothesis:** Higher deprivation score and single persone household lead to higher mental health illness
+* **Hypothesis:** Higher unemployment rate, population density and single person household lead to higher mental health illness
 
 ### Check for linear relationship between x and y
 
@@ -330,10 +335,11 @@ The remaining variables no longer exhibit strong multicollinearity, so I will re
 regression_data <- df %>%
   dplyr::select(lsoa11cd,
                 samhi_dec,
-                imd_score,
+                unemployment_rate,
+                pop_dens,
                 single_hc)
 
-p1 <- ggplot(regression_data, aes(x=imd_score, y=samhi_dec)) + 
+p1 <- ggplot(regression_data, aes(x=pop_dens, y=samhi_dec)) + 
   geom_point() +
   geom_smooth(method=lm) +
   theme_classic()
@@ -343,7 +349,12 @@ p2 <- ggplot(regression_data, aes(x=single_hc, y=samhi_dec)) +
   geom_smooth(method=lm) +
   theme_classic()
 
-plot_grid(p1, p2)
+p3 <- ggplot(regression_data, aes(x=unemployment_rate, y=samhi_dec)) + 
+  geom_point() +
+  geom_smooth(method=lm) +
+  theme_classic()
+
+plot_grid(p1, p2,p3)
 ```
 
 There seems to be a slight positive relationship between all our predictor variables and the percentage of obesity in the population.
@@ -353,7 +364,7 @@ Now I will fit a linear model using the ordinary least squares method.
 
 ```{r lm}
 eq <- samhi_dec ~
-  imd_score + single_hc
+  single_hc + pop_dens + unemployment_rate
 
 ols_model <- lm(eq,
                 data = regression_data)

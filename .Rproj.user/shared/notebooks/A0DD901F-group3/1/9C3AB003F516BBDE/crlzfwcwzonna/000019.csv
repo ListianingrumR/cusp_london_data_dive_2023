@@ -1,0 +1,4 @@
+"0","depriv <- read_excel(here::here(""data"",""lsoa-data.xls""))%>%"
+"0","  clean_names()"
+"0",""
+"0","head(depriv)"

@@ -1,0 +1,8 @@
+"0","eq <- samhi_dec ~"
+"0","  single_hc + pop_dens + unemployment_rate"
+"0",""
+"0","ols_model <- lm(eq,"
+"0","                data = regression_data)"
+"0",""
+"0","# show the summary of those outputs"
+"0","tidy(ols_model)"
