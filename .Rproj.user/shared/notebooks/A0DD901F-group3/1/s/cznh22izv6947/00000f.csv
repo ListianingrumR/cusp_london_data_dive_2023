@@ -1,0 +1,8 @@
+"0","# save localR2 and coefficients to original data frame"
+"0","shape_joined2$abw_localR2 <- results$localR2"
+"0",""
+"0","shape_joined2$coef_single_hc <- results$single_hc"
+"0",""
+"0","shape_joined2$coef_unemployment_rate <- results$unemployment_rate"
+"0",""
+"0","shape_joined2$coef_pop_dens <- results$pop_dens"

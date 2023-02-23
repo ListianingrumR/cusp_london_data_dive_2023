@@ -1,1 +1,1 @@
-"0","write.csv(shape_joined2, file='./result.csv')"
+"0","write.csv(shape_joined2[,c(""lsoa11cd"",""coef_single_hc"",""coef_unemployment_rate"",""coef_pop_dens"",""t_single_hc_cat"",""t_unemployment_rate_cat"",""t_pop_dens_cat"")], file='./result.csv')"

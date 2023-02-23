@@ -210,7 +210,7 @@ predictors <- samhi_2011 %>%
 ```
 
 ```{r}
-write.csv(df, file='./data.csv')
+#write.csv(df, file='./data.csv')
 ```
 
 ```{r}
@@ -480,20 +480,6 @@ The global Moran’s I statistic is 4.689294e-01 (1 = clustered, 0 = no pattern,
 The p-value is less than 2.2e-16, indicating that the results are statistically significant at the 99.9% level of significance. We can reject the null hypothesis that the model residuals are randomly distributed among LSOAs.
 
 The standard deviation (or Z-score) is positive (48.343), indicating that the spatial distribution of high values and/or low values of residuals is more spatially clustered than would be expected if underlying spatial processes were random.
-
-## Spatial Regression Models
-
-Now that we have established that spatial autocorrelation is present, there are two ways to deal with it, either by using a spatially lagged regression model or a spatial error model. 
-
-### Lagrange Multiplier Test
-I will use the lagrange multiplier test to decide whether to use the spatial lag or error model. 
-
-```{r LMtests}
-lm.LMtests(ols_model, lsoa_spatial_weights_list, 
-           test = c("LMerr", "LMlag", "RLMerr", "RLMlag", "SARMA"))
-```
-
-The results show that the robust spatially lagged regression model (RLMlag = 0.042332) has a p-value that is much more significant than the robust spatial error model (RLMerr=568.62), so we will pick the spatially lagged regression model. 
 
 ## Geographically Weighted Regression
 Perhaps the spatial autocorrelation that we have observed for obesity percentages in London MSOAs is indicative of some local variation that the global OLS model has failed to capture. 
@@ -791,5 +777,5 @@ map_imd
 ```
 
 ```{r}
-write.csv(shape_joined2, file='./result.csv')
+write.csv(shape_joined2[,c("lsoa11cd","coef_single_hc","coef_unemployment_rate","coef_pop_dens","t_single_hc_cat","t_unemployment_rate_cat","t_pop_dens_cat")], file='./result.csv')
 ```

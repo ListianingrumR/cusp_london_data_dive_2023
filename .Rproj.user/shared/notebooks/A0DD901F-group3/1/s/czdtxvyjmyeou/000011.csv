@@ -1,4 +1,0 @@
-"0","write.csv(df, file='./data.csv')"
-"2","Error in as.data.frame.default(x[[i]], optional = TRUE) : 
-  cannot coerce class ‘""function""’ to a data.frame
-"

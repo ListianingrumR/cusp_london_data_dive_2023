@@ -210,7 +210,7 @@ predictors <- samhi_2011 %>%
 ```
 
 ```{r}
-write.csv(df, file='./data.csv')
+#write.csv(df, file='./data.csv')
 ```
 
 ```{r}
@@ -281,7 +281,7 @@ Most of the variables appear normally distributed, except for population density
 # pearson correlation is only appropriate for interval or ratio data
 # we are only concerned about multicollinearity between predictor variables
 myvars <- df %>%
-  dplyr::select(samhi_dec,pop_dens,unemployment_rate,single_hc,annual_income) %>%
+  dplyr::select(pop_dens,unemployment_rate,single_hc,annual_income) %>%
   st_drop_geometry()
 
 # get correlation matrix
@@ -306,7 +306,7 @@ It looks like pop_dens is highly correlated with imd_score and less correlated w
 
 ```{r multicollinearity selected}
 myvars2 <- myvars %>%
-  select(samhi_dec,unemployment_rate,pop_dens,single_hc)
+  select(unemployment_rate,pop_dens,single_hc)
 
 cormat <- cor(myvars2, use="complete.obs", method="pearson")
 
@@ -379,11 +379,11 @@ Adjusted R-squared = 32.6%
 p-values:
 unemployment= 6.599478e-194
 single_hc= 2.590688e-230
-pop_dens= 3.761510e-08
+pop_dens= 3.761510e-08 
 
-The results indicate that 32.6% of the variation in the mental health index can be explained by the deprivation score and average single household. The individual p-values for all predictor variables are significant at the 99.9% level of significance.
+The results indicate that 32.6% of the variation in the mental health index can be explained by the single person household, unemployment rate and population density. The individual p-values for all predictor variables are significant at the 99.9% level of significance.
 
-The higher rate of single household and unempolyment rate lead to higher SAMHI index (CMD cases) and the lower population density leads to higher SAMHI index.
+The higher rate of single person household and unempolyment rate lead to higher SAMHI index (CMD cases) and the lower population density leads to higher SAMHI index.
 
 ### Check for normally distributed residuals
 
@@ -418,7 +418,7 @@ tm_shape(shape_joined) +
   tm_polygons("ols_model_res")
 ```
 
-The map shows that MSOAs with positive residuals seem to be neighbouring other MSOAs with positive residuals, while those with negative residuals also exhibit some clustering. 
+The map shows that LSOAs with positive residuals seem to be neighbouring other LSOAs with positive residuals, while those with negative residuals also exhibit some clustering. 
 
 To obtain a more quantitative measure of spatial autocorrelation, I will turn to Moran's I. 
 
@@ -479,76 +479,7 @@ The global Moran’s I statistic is 4.689294e-01 (1 = clustered, 0 = no pattern,
 
 The p-value is less than 2.2e-16, indicating that the results are statistically significant at the 99.9% level of significance. We can reject the null hypothesis that the model residuals are randomly distributed among LSOAs.
 
-The standard deviate (or Z-score) is positive (48.343), indicating that the spatial distribution of high values and/or low values of residuals is more spatially clustered than would be expected if underlying spatial processes were random.
-
-## Spatial Regression Models
-
-Now that we have established that spatial autocorrelation is present, there are two ways to deal with it, either by using a spatially lagged regression model or a spatial error model. 
-
-### Lagrange Multiplier Test
-I will use the lagrange multiplier test to decide whether to use the spatial lag or error model. 
-
-```{r LMtests}
-lm.LMtests(ols_model, lsoa_spatial_weights_list, 
-           test = c("LMerr", "LMlag", "RLMerr", "RLMlag", "SARMA"))
-```
-
-The results show that the robust spatially lagged regression model (RLMlag = 0.042332) has a p-value that is much more significant than the robust spatial error model (RLMerr=568.62), so I will pick the spatially lagged regression model. 
-
-### Spatially lagged regression model
-
-```{r spatial lag model}
-# Spatial simultaneous autoregressive lag model estimation
-splag_model <- lagsarlm(eq, 
-                        data = regression_data, 
-                        lsoa_spatial_weights_list)
-
-# what do the outputs show?
-tidy(splag_model)
-glance(splag_model)
-summary(splag_model)
-```
-
-The spatially lagged regression model incorporates spatial dependence explicitly by adding a “spatially lagged” dependent variable, rho, on the right-hand side of the regression equation.
-
-The results show that rho is statistically significant, and the estimate of rho (0.74) is larger than its standard error (0.02), so we can conclude that there is some spatial dependence which we should bear in mind when interpreting the results of our regression model.
-
-In our scenario, this means that the obesity percentage in one MSOA may be associated with or influenced by the obesity percentage in the four nearest neighbouring MSOAs (as defined in our neighbours list).
- 
-To check if this is true, I will use Moran's I to identify spatial autocorrelation in the dependent variable, obesity percentage.
-
-```{r moran I obesity}
-global_moran_cmd <- shape_joined %>%
-  pull(samhi_dec) %>%
-  as.vector() %>%
-  moran.test(., lsoa_spatial_weights_list) 
-
-global_moran_cmd
-```
-
-The Moran's I statistic confirms that the spatial distribution of high values and/or low values of obesity percentage across MSOAs is spatially clustered.
-
-```{r map spatial lag res}
-# write out the residuals
-shape_joined <- shape_joined %>%
-  mutate(splag_model_res = residuals(splag_model))
-
-tm_shape(shape_joined) + 
-  tm_polygons(col = "splag_model_res") +  
-  tm_compass(type = "arrow", position = c("right", "top") , size = 2) + 
-  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("right", "bottom")) + 
-  tm_layout(bg.color = "white", legend.outside = TRUE)
-```
-
-```{r moran I residuals}
-# check that the residuals from the spatially lagged model are now no longer exhibiting spatial autocorrelation
-splag_moran <- moran.test(shape_joined$splag_model_res, 
-                          msoa_spatial_weights_list)
-
-splag_moran
-```
-
-The results of Moran’s I test for spatial autocorrelation show that the residuals of the spatially lagged regression model are no longer spatially autocorrelated, as the Moran I statistic is close to 0. However, this result is not statistically significant, as the p-value is large.
+The standard deviation (or Z-score) is positive (48.343), indicating that the spatial distribution of high values and/or low values of residuals is more spatially clustered than would be expected if underlying spatial processes were random.
 
 ## Geographically Weighted Regression
 Perhaps the spatial autocorrelation that we have observed for obesity percentages in London MSOAs is indicative of some local variation that the global OLS model has failed to capture. 
@@ -571,7 +502,7 @@ GWR_bandwidth <- gwr.sel(eq,
 GWR_bandwidth
 
 ```
-The optimal bandwidth is about 0.0034 meaning 0.34% of all the total spatial units should be used for the local regression based on k-nearest neighbours. This is about 3 of the 983 MSOAs.
+The optimal bandwidth is about 0.0021 meaning 0.21% of all the total spatial units should be used for the local regression based on k-nearest neighbours. This is about 10 of the 4835 LSOAs.
 
 
 ```{r fit gwr model}
@@ -592,19 +523,19 @@ results <- as.data.frame(gwr_abw$SDF)
 # names(results)
 ```
 
-The coefficients for the weight of fat in the average food product range from a minimum value of -10.6 (1 gram increase in fat resulting in a drop in obesity percentage of 10.6) to +8.16 (1 gram increase in fat resulting in a increase in obesity percentage of 8.16). 
+The coefficients for single house range from a minimum value of -1.2e- (1 gram increase in fat resulting in a drop in obesity percentage of 10.6) to +8.16 (1 gram increase in fat resulting in a increase in obesity percentage of 8.16). 
 
-For half of the MSOAs in the dataset, as the weight of the average food product increases by 1 gram, the obesity percentage will increase between 0.012 and 0.067 points (the inter-quartile range between the 1st Qu and the 3rd Qu).
+For half of the LSOAs in the dataset, as the weight of the average food product increases by 1 gram, the obesity percentage will increase between 0.012 and 0.067 points (the inter-quartile range between the 1st Qu and the 3rd Qu).
 
 ```{r save results}
 # save localR2 and coefficients to original data frame
 shape_joined2$abw_localR2 <- results$localR2
 
-shape_joined2$coef_weight <- results$weight
+shape_joined2$coef_single_hc <- results$single_hc
 
-shape_joined2$coef_fat <- results$fat
+shape_joined2$coef_unemployment_rate <- results$unemployment_rate
 
-shape_joined2$coef_log_f_soft_drinks <- results$log_f_soft_drinks
+shape_joined2$coef_pop_dens <- results$pop_dens
 ```
 
 ### Map local R2
@@ -615,134 +546,170 @@ legend_title = expression("Adaptive bandwidth: Local R2")
 
 map_abgwr1 = tm_shape(shape_joined2) +
   tm_fill(col = "abw_localR2", title = legend_title, 
-          palette = "Oranges", style = "cont") +
-  tm_borders(col = "gray", lwd = .1) + 
-  tm_compass(type = "arrow", position = c("right", "top") , size = 2) + 
+          palette = "RdBu", style = "quantile", midpoint = NA) +
+  tm_borders(col = "white", lwd = .1) + 
+  tm_compass(type = "arrow", position = c("right", "top") , size = .8) + 
   tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("right", "bottom")) +
-  tm_layout(bg.color = "white", legend.outside = TRUE)
+  tm_layout(main.title = "Adaptive bandwidth: Local R2", main.title.size=1.5, bg.color = "white", legend.outside = TRUE, legend.hist.width=.5, legend.hist.height=.5, legend.outside.size = .5)
 
 map_abgwr1
+tmap_save(map_abgwr1, "map_abgwr1.png", height=7)
 ```
 
-The local R-squared values range from 0.2 to 0.8, with several MSOAs near the center having higher R-squared values. 
+The local R-squared values range from -0.04 to 0.8, with several LSOAs that having higher R-squared values varies and spread accross London. E.g. :
 
 ### Map the coefficients
 
 ```{r map coef}
-# weight
-legend_title = expression("Weight of average food product (grams)")
+# single_hc
+legend_title = expression("Coefficient of Single Person Household")
 
-map_abgwr2 = tm_shape(shape_joined2) +
-  tm_fill(col = "coef_weight", title = legend_title, 
-          palette = "RdBu", style = "cont") + 
-  tm_borders(col = "gray", lwd = .1)  +
-  tm_compass(type = "arrow", position = c("right", "top") , size = 2) +
+map_coef_single_hc = tm_shape(shape_joined2) +
+  tm_fill(col = "coef_single_hc", title = legend_title, midpoint=NA,
+          palette = "RdBu", style = "quantile") + 
+  tm_borders(col = "white", lwd = .1)  +
+  tm_compass(type = "arrow", position = c("right", "top") , size = .8) +
   tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) + 
-  tm_layout(bg.color = "white", legend.outside = TRUE)
+  tm_layout(main.title = "Coefficient of Single person Household", main.title.size=1.5, bg.color = "white", legend.outside = TRUE, legend.hist.width=.5, legend.hist.height=.5, legend.outside.size = .5)
 
-map_abgwr2
+map_coef_single_hc
+tmap_save(map_coef_single_hc, "map_coef_single_hc.png")
 
-# fat
-legend_title = expression("Weight of fat in the average product (grams)")
+# unemployment rate
+legend_title = expression("Coefficient of Unemployment Rate")
 
-map_abgwr3 = tm_shape(shape_joined2) +
-  tm_fill(col = "coef_fat", title = legend_title, 
-          palette = "RdBu", style = "cont") + 
-  tm_borders(col = "gray", lwd = .1)  + 
-  tm_compass(type = "arrow", position = c("right", "top") , size = 2) +
+map_coef_unemployment_rate = tm_shape(shape_joined2) +
+  tm_fill(col = "coef_unemployment_rate", title = legend_title, midpoint=NA,
+          palette = "RdBu", style = "quantile") + 
+  tm_borders(col = "white", lwd = .1)  + 
+  tm_compass(type = "arrow", position = c("right", "top") , size = .8) +
   tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) + 
-  tm_layout(bg.color = "white", legend.outside = TRUE) 
+  tm_layout(main.title = "Coefficient of Unemployment Rate", main.title.size=1.5, bg.color = "white", legend.outside = TRUE, legend.hist.width=.5, legend.hist.height=.5, legend.outside.size = .5) 
 
-map_abgwr3
+map_coef_unemployment_rate
+tmap_save(map_coef_unemployment_rate, "map_coef_unemployment_rate.png")
 
-# soft drinks
-legend_title = expression("Log(fraction of soft drinks purchased)")
+# population density
+legend_title = expression("Coefficient of Population Density")
 
-map_abgwr4 = tm_shape(shape_joined2) +
-  tm_fill(col = "coef_log_f_soft_drinks", title = legend_title, 
-          palette = "RdBu", style = "cont") + 
-  tm_borders(col = "gray", lwd = .1)  + 
-  tm_compass(type = "arrow", position = c("right", "top") , size = 2) +
+map_coef_pop_dens = tm_shape(shape_joined2) +
+  tm_fill(col = "coef_pop_dens", title = legend_title, midpoint=NA, palette = "RdBu", style = "quantile") + 
+  tm_borders(col = "white", lwd = .1)  + 
+  tm_compass(type = "arrow", position = c("right", "top") , size = .8) +
   tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) + 
-  tm_layout(bg.color = "white", legend.outside = TRUE) 
+  tm_layout(main.title = "Coefficient of Population Density", main.title.size=1.5, bg.color = "white", legend.outside = TRUE, legend.hist.width=.5, legend.hist.height=.5, legend.outside.size = .5) 
 
-map_abgwr4
+map_coef_pop_dens
+tmap_save(map_coef_pop_dens, "map_coef_pop_dens.png")
 ```
 
-The coefficients for the weight of the average food product show that the relationship between this variable and obesity percentage is positive for most MSOAs, especially in some central areas towards the south of the river. 
+The coefficients for the single person household show that the relationship between this variable and mental health index is positive for most LSOAs, especially in some central areas towards the east side of London. 
 
-Interestingly, on the outskirts of London, the relationship between weight of the average food product and obesity is negative (indicated in red on the map), which is unexpected. There could be some other factors at play that are unrelated to diets, perhaps related to lifestyle habits.
+Interestingly, on the north west outskirts of London, the relationship between single person household and mental health index is negative (indicated in red on the map), which is unexpected. There could be some other factors at play that are unrelated to mental health, perhaps related to ___.
 
-The coefficients for the weight of fat in the average product show that some MSOAs have negative coefficients, meaning that an increase in the weight of fat in the average product leads to a decrease in obesity percentage. 
+The coefficients for the population density show that most of LSOAs have negative coefficients, meaning that an increase in population density leads to a decrease in mental health index. We also can see the trend of negative relationship shows stronger in the outer side of London.
 
-The coefficients for the log transformed fraction of soft drinks purchased show that there is mostly a positive relationship between this variable and obesity percentage across MSOAs. 
+The coefficients for the unemployment rate show that there is mostly a positive relationship between this variable and mental health index across LSOAs in south part of London and the opposite result in north part of London.
 
 ### Assessing statistical significance
 Roughly, if a coefficient estimate has an absolute value of t greater than 1.96 and the sample is sufficiently large, then it is statistically significant.
 
-```{r t statistic weight}
+```{r t statistic single person household}
 # compute t statistic
-shape_joined2$t_weight = results$weight / results$weight_se
+shape_joined2$t_single_hc = results$single_hc / results$single_hc_se
 
 # categorise t values
-shape_joined2$t_weight_cat <- cut(shape_joined2$t_weight,
-                     breaks = c(min(shape_joined2$t_weight), 
+shape_joined2$t_single_hc_cat <- cut(shape_joined2$t_single_hc,
+                     breaks = c(min(shape_joined2$t_single_hc), 
                               -1.96, 1.96, 
-                              max(shape_joined2$t_weight)),
+                              max(shape_joined2$t_single_hc)),
                      labels = c("sig","nonsig", "sig"))
 
 # map statistically significant coefs
-legend_title = expression("Weight of avg food product: significant")
+legend_title = expression("Single person household significancy")
 
-map_sig_weight = tm_shape(shape_joined2) + 
-  tm_fill(col = "t_weight_cat", title = legend_title, 
-          legend.hist = TRUE, midpoint = NA, 
+map_sig_single_hc = tm_shape(shape_joined2) + 
+  tm_fill(col = "t_single_hc_cat", title = legend_title, palette = "RdBu",
+          legend.hist = FALSE, midpoint = NA, 
           textNA = "", colorNA = "white") +  
   tm_borders(col = "grey", lwd = .1)  + 
-  tm_compass(type = "arrow", position = c("right", "top") , size = 2) + 
-  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("right", "bottom")) + 
-  tm_layout(bg.color = "white", legend.outside = TRUE)
+  tm_compass(type = "arrow", position = c("right", "top") , size = 1) + 
+  tm_scale_bar(breaks = c(0,1,2), text.size = 1, position =  c("right", "bottom")) + 
+  tm_layout(main.title = "Single person household significancy", main.title.size=1.5, bg.color = "white", legend.outside = TRUE, legend.hist.width=.5, legend.hist.height=.5, legend.outside.size = .5)
 
-map_sig_weight
+map_sig_single_hc
+
+tmap_save(map_sig_single_hc, "map_sig_single_hc.png", height=7)
 ```
 
-For slightly more than half of the MSOAs, the results for the weight of the average food product are statistically significant in explaining obesity percentages. 
+For more than half of the LSOAs, the results for the single person household are statistically significant in explaining mental health index. 
 
-```{r t statistic fat}
+```{r t statistic unemployment rate}
 # compute t statistic
-shape_joined2$t_fat = results$fat / results$fat_se
+shape_joined2$t_unemployment_rate = results$unemployment_rate / results$unemployment_rate_se
 
 # categorise t values
-shape_joined2$t_fat_cat <- cut(shape_joined2$t_fat,
-                     breaks = c(min(shape_joined2$t_fat), 
+shape_joined2$t_unemployment_rate_cat <- cut(shape_joined2$t_unemployment_rate,
+                     breaks = c(min(shape_joined2$t_unemployment_rate), 
                               -1.96, 1.96, 
-                              max(shape_joined2$t_fat)),
+                              max(shape_joined2$t_unemployment_rate)),
                      labels = c("sig","nonsig", "sig"))
 
 # map statistically significant coefs 
-legend_title = expression("Weight of fat in avg food product: significant")
+legend_title = expression("Unemployment rate significancy")
 
-map_sig_fat = tm_shape(shape_joined2) + 
-  tm_fill(col = "t_fat_cat", title = legend_title, 
-          legend.hist = TRUE, midpoint = NA, 
+map_sig_unemployment_rate = tm_shape(shape_joined2) + 
+  tm_fill(col = "t_unemployment_rate_cat", title = legend_title, palette = "RdBu",
+          legend.hist = FALSE, midpoint = NA, 
+          textNA = "", colorNA = "white") +  
+  tm_borders(col = "grey", lwd = .1)  + 
+  tm_compass(type = "arrow", position = c("left", "bottom") , size = 2) + 
+  tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("right", "bottom")) + 
+  tm_layout(main.title = "Unemployment rate significancy", main.title.size=1.5, bg.color = "white", legend.outside = TRUE, legend.hist.width=.5, legend.hist.height=.5, legend.outside.size = .5)
+
+map_sig_unemployment_rate
+
+tmap_save(map_sig_unemployment_rate, "map_sig_unemployment_rate.png", height=7)
+```
+
+This map shows that the unemployment rate is statistically significant for most of the LSOAs, 
+
+```{r t statistic population density}
+# compute t statistic
+shape_joined2$t_pop_dens = results$pop_dens / results$pop_dens_se
+
+# categorise t values
+shape_joined2$t_pop_dens_cat <- cut(shape_joined2$t_pop_dens,
+                     breaks = c(min(shape_joined2$t_pop_dens), 
+                              -1.96, 1.96, 
+                              max(shape_joined2$t_pop_dens)),
+                     labels = c("sig","nonsig", "sig"))
+
+# map statistically significant coefs 
+legend_title = expression("Population Density significancy")
+
+map_sig_pop_dens = tm_shape(shape_joined2) + 
+  tm_fill(col = "t_pop_dens_cat", title = legend_title, palette = "RdBu",
+          legend.hist = FALSE, midpoint = NA, 
           textNA = "", colorNA = "white") +  
   tm_borders(col = "grey", lwd = .1)  + 
   tm_compass(type = "arrow", position = c("right", "top") , size = 2) + 
   tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("right", "bottom")) + 
-  tm_layout(bg.color = "white", legend.outside = TRUE)
+  tm_layout(main.title = "Population density significancy", main.title.size=1.5, bg.color = "white", legend.outside = TRUE, legend.hist.width=.5, legend.hist.height=.5, legend.outside.size = .5)
 
-map_sig_fat
+map_sig_pop_dens
+
+tmap_save(map_sig_pop_dens, "map_sig_pop_dens.png", height=7)
 ```
 
-This map shows that the weight of fat in the average food product is not statistically significant for most of the MSOAs, so we should take this into account when interpreting the results of this variable in the GWR. 
+This map shows that the population density is not statistically significant for most of the LSOAs, so we should take this into account when interpreting the results of this variable in the GWR.
 
 ## Reflection
-In conclusion, I have looked at three dietary factors and their relationship with obesity percentages, namely, the weight of the average food product, the weight of fat in the average food product, and the fraction of soft drinks purchased. 
+In conclusion, we have looked at three factors and their relationship with mental health index, namely, single person household, unemployment rate and population density 
 
-I have used three different models to model the relationship between these factors and obesity, namely, the ordinary least squares multiple linear regression model, the spatially lagged regression model and finally, the geographically weighted regression model. 
+We have used two different models to model the relationship between these factors and mental health index, namely, the ordinary least squares multiple linear regression model, and the geographically weighted regression model. 
 
-In general, the results show that higher weights of the average food product and fat in the average food product are associated with higher obesity percentages, so policymakers can look into ways to encourage people to reduce these numbers to combat obesity.
-
+In general, the results show that unemployment rate and single person household are associated with higher obesity percentages, so policymakers can look into ways to reduce these numbers to combat mental health.
 
 ```{r}
 # plot population density
@@ -753,7 +720,7 @@ map_samhi <- tm_shape(df)+
           textNA = "No data",
           colorNA = "white", 
           palette = "RdBu")+
-  tm_borders(col = "gray", lwd = .1) +
+  tm_borders(col = "white", lwd = .1) +
   tm_compass(type = "arrow", position = c("right", "top") , size = .5) +
   tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) +
   tm_layout(bg.color = "white", legend.outside = TRUE)
@@ -770,7 +737,7 @@ map_pd <- tm_shape(df)+
           textNA = "No data",
           colorNA = "white", 
           palette = "RdBu")+
-  tm_borders(col = "gray", lwd = .1) +
+  tm_borders(col = "white", lwd = .1) +
   tm_compass(type = "arrow", position = c("right", "top") , size = .5) +
   tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) +
   tm_layout(bg.color = "white", legend.outside = TRUE)
@@ -786,7 +753,7 @@ map_imd <- tm_shape(df)+
           textNA = "No data",
           colorNA = "white", 
           palette = "RdBu")+
-  tm_borders(col = "gray", lwd = .1) +
+  tm_borders(col = "white", lwd = .1) +
   tm_compass(type = "arrow", position = c("right", "top") , size = .5) +
   tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) +
   tm_layout(bg.color = "white", legend.outside = TRUE)
@@ -802,9 +769,13 @@ map_imd <- tm_shape(df)+
           textNA = "No data",
           colorNA = "white", 
           palette = "RdBu")+
-  tm_borders(col = "gray", lwd = .1) +
+  tm_borders(col = "white", lwd = .1) +
   tm_compass(type = "arrow", position = c("right", "top") , size = .5) +
   tm_scale_bar(breaks = c(0,1,2), text.size = 0.7, position =  c("left", "bottom")) +
   tm_layout(bg.color = "white", legend.outside = TRUE)
 map_imd
+```
+
+```{r}
+write.csv(shape_joined2, file='./result.csv')
 ```

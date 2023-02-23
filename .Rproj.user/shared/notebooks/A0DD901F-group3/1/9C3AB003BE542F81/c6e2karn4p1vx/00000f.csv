@@ -1,3 +1,0 @@
-"0","hc_2011 <- hc%>%"
-"0","  mutate(single_hc=household_composition_one_person_household_measures_value/household_composition_all_categories_household_composition_measures_value)%>%"
-"0","  select(geography_code, single_hc)"

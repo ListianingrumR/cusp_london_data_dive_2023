@@ -1,7 +1,0 @@
-"0","shape_joined <- df %>%"
-"0","  mutate(ols_model_res = residuals(ols_model))"
-"0",""
-"0","ggplot(shape_joined, aes(x=ols_model_res)) +"
-"0","  geom_histogram(color = ""darkblue"","
-"0","                 fill = ""lightblue"") +"
-"0","  theme_bw()"
