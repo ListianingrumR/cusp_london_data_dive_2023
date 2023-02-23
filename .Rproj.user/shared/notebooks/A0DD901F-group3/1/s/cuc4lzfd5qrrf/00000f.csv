@@ -1,0 +1,4 @@
+"0","# Spatial simultaneous autoregressive lag model estimation"
+"0","splag_model <- lagsarlm(eq, "
+"0","                        data = regression_data, "
+"0","                        lsoa_spatial_weights_list)"
